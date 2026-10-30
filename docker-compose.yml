@@ -1,0 +1,21 @@
+services:
+  smx-nats-monitor:
+    build: .
+    image: smx-nats-monitor:latest
+    container_name: smx-nats-monitor
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - NATS_URL=tls://192.168.1.60:4222
+      - NATS_CREDS_FILE=/creds/smx-nats-monitor.creds
+      - NATS_CA_FILE=/certs/ca.crt
+      - DB_PATH=/data/monitor.db
+      - POLL_INTERVAL=15
+    volumes:
+      - /opt/smx-hub/creds/smx-nats-monitor.creds:/creds/smx-nats-monitor.creds:ro
+      - /opt/smx-hub/certs/ca.crt:/certs/ca.crt:ro
+      - monitor-data:/data
+
+volumes:
+  monitor-data:

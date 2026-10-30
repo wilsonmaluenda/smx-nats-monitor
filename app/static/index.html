@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMX NATS Monitor</title>
+<style>
+  :root {
+    --teal-dark: #006064;
+    --teal: #00838F;
+    --teal-accent: #00ACC1;
+    --teal-light: #E0F7FA;
+    --bg: #f5f7f8;
+    --card: #ffffff;
+    --text: #263238;
+    --muted: #78909c;
+    --border: #e0e7ea;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: linear-gradient(90deg, var(--teal-dark), var(--teal)); color: #fff; padding: 14px 22px; display: flex; align-items: center; gap: 14px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header .sub { font-size: 12px; opacity: .85; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #4caf50; box-shadow: 0 0 0 3px rgba(76,175,80,.25); }
+  .dot.off { background: #f44336; box-shadow: 0 0 0 3px rgba(244,67,54,.25); }
+  .wrap { padding: 18px 22px; max-width: 1400px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .card .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .card .v { font-size: 26px; font-weight: 600; color: var(--teal-dark); margin-top: 4px; }
+  .card .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 10px; font-size: 15px; color: var(--teal-dark); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:hover td { background: var(--teal-light); }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .b-stream { background: #e8f5e9; color: #2e7d32; }
+  .b-consumer { background: #e3f2fd; color: #1565c0; }
+  .b-api { background: #eceff1; color: #546e7a; }
+  .b-other { background: #fff3e0; color: #ef6c00; }
+  .lag { font-weight: 700; }
+  .lag.hot { color: #ef6c00; }
+  .lag.cold { color: #2e7d32; }
+  canvas { width: 100%; height: 220px; display: block; }
+  #feed { max-height: 320px; overflow-y: auto; font-size: 12.5px; }
+  #feed .ev { padding: 6px 8px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: baseline; }
+  #feed .ev .t { color: var(--muted); font-variant-numeric: tabular-nums; flex: 0 0 70px; }
+  #feed .ev .body { flex: 1; }
+  #feed .ev .stream { color: var(--teal); font-weight: 600; }
+  .empty { color: var(--muted); font-style: italic; padding: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="status-dot"></span>
+  <div>
+    <h1>SMX NATS Monitor</h1>
+    <div class="sub">JetStream &middot; Streams, Consumer, Lag, Advisories</div>
+  </div>
+  <div style="margin-left:auto; text-align:right; font-size:12px; opacity:.85">
+    <div id="last-update">–</div>
+    <div id="conn-state">verbinde…</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="cards">
+    <div class="card"><div class="k">Streams</div><div class="v" id="c-streams">–</div></div>
+    <div class="card"><div class="k">Consumer</div><div class="v" id="c-consumers">–</div></div>
+    <div class="card"><div class="k">Messages gesamt</div><div class="v" id="c-messages">–</div><div class="s" id="c-rate"></div></div>
+    <div class="card"><div class="k">Storage</div><div class="v" id="c-bytes">–</div></div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2>Streams</h2>
+        <table>
+          <thead><tr><th>Name</th><th class="num">Messages</th><th class="num">Size</th><th class="num">Last Seq</th><th>Retention</th></tr></thead>
+          <tbody id="streams-body"><tr><td class="empty" colspan="5">lade…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>Consumer (Lag = num_pending)</h2>
+        <table>
+          <thead><tr><th>Stream</th><th>Consumer</th><th class="num">Lag</th><th class="num">Ack pending</th><th class="num">Delivered</th><th class="num">Redelivered</th></tr></thead>
+          <tbody id="consumers-body"><tr><td class="empty" colspan="6">lade…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Messages pro Stream (kumulativ)</h2>
+        <canvas id="chart-messages"></canvas>
+      </div>
+      <div class="panel">
+        <h2>Lag-Entwicklung pro Consumer</h2>
+        <canvas id="chart-lag"></canvas>
+      </div>
+      <div class="panel">
+        <h2>Ereignisse (Advisories, live)</h2>
+        <div id="feed"><div class="empty">warte auf Ereignisse…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLORS = ['#006064','#00ACC1','#00838F','#26A69A','#5C6BC0','#EF6C00','#8E24AA','#43A047'];
+const fmtNum = n => {
+  if (n == null) return '–';
+  if (n >= 1e9) return (n/1e9).toFixed(1)+'G';
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'k';
+  return String(n);
+};
+const fmtBytes = n => {
+  if (n == null) return '–';
+  if (n >= 1<<30) return (n/(1<<30)).toFixed(1)+' GiB';
+  if (n >= 1<<20) return (n/(1<<20)).toFixed(1)+' MiB';
+  if (n >= 1<<10) return (n/(1<<10)).toFixed(1)+' KiB';
+  return n+' B';
+};
+const fmtTime = t => new Date(t*1000).toISOString().substr(11,8);
+const toEpoch = iso => Date.parse(iso)/1000;
+
+function badgeFor(type) {
+  if (type.startsWith('STREAM')) return 'b-stream';
+  if (type.startsWith('CONSUMER')) return 'b-consumer';
+  if (type.startsWith('API')) return 'b-api';
+  return 'b-other';
+}
+
+async function loadState() {
+  try {
+    const r = await fetch('/api/state');
+    const d = await r.json();
+    document.getElementById('conn-state').textContent = 'NATS verbunden';
+    document.getElementById('status-dot').className = 'dot';
+    renderCards(d);
+    renderStreams(d.streams);
+    renderConsumers(d.consumers);
+    document.getElementById('last-update').textContent = 'Stand ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('conn-state').textContent = 'Fehler: ' + e;
+    document.getElementById('status-dot').className = 'dot off';
+  }
+}
+
+function renderCards(d) {
+  const totalMsgs = d.streams.reduce((a,s)=>a+(s.messages||0),0);
+  const totalBytes = d.streams.reduce((a,s)=>a+(s.bytes||0),0);
+  document.getElementById('c-streams').textContent = d.streams.length;
+  document.getElementById('c-consumers').textContent = d.consumers.length;
+  document.getElementById('c-messages').textContent = fmtNum(totalMsgs);
+  document.getElementById('c-bytes').textContent = fmtBytes(totalBytes);
+}
+
+function renderStreams(streams) {
+  const tbody = document.getElementById('streams-body');
+  if (!streams.length) { tbody.innerHTML = '<tr><td class="empty" colspan="5">keine Streams</td></tr>'; return; }
+  tbody.innerHTML = streams.map(s => `
+    <tr>
+      <td><b>${esc(s.name)}</b></td>
+      <td class="num">${fmtNum(s.messages)}</td>
+      <td class="num">${fmtBytes(s.bytes)}</td>
+      <td class="num">${fmtNum(s.last_seq)}</td>
+      <td>${esc(s.retention||'')}</td>
+    </tr>`).join('');
+}
+
+function renderConsumers(consumers) {
+  const tbody = document.getElementById('consumers-body');
+  if (!consumers.length) { tbody.innerHTML = '<tr><td class="empty" colspan="6">keine Consumer</td></tr>'; return; }
+  tbody.innerHTML = consumers.map(c => `
+    <tr>
+      <td>${esc(c.stream)}</td>
+      <td><b>${esc(c.name)}</b></td>
+      <td class="num lag ${(c.num_pending||0)>0?'hot':'cold'}">${fmtNum(c.num_pending)}</td>
+      <td class="num">${fmtNum(c.num_ack_pending)}</td>
+      <td class="num">${fmtNum(c.delivered)}</td>
+      <td class="num">${fmtNum(c.redelivered)}</td>
+    </tr>`).join('');
+}
+
+async function loadSnapshots() {
+  try {
+    const r = await fetch('/api/snapshots?minutes=60');
+    const d = await r.json();
+    renderCharts(d.snapshots);
+  } catch (e) { /* ignore */ }
+}
+
+function groupSeries(snaps, entityType, valueFn) {
+  const byEntity = {};
+  snaps.forEach(s => {
+    if (s.entity_type !== entityType) return;
+    const v = valueFn(s);
+    if (v == null) return;
+    (byEntity[s.entity_id] = byEntity[s.entity_id] || []).push({t: toEpoch(s.ts), y: v});
+  });
+  return Object.entries(byEntity).map(([name, points], i) => ({name, points, color: COLORS[i % COLORS.length]}));
+}
+
+function renderCharts(snaps) {
+  const streamSeries = groupSeries(snaps, 'stream', s => s.messages);
+  const consumerSeries = groupSeries(snaps, 'consumer', s => s.num_pending);
+  drawTimeSeries(document.getElementById('chart-messages'), streamSeries);
+  drawTimeSeries(document.getElementById('chart-lag'), consumerSeries);
+  // msg/min rate for the card
+  const sm = streamSeries.find(s => s.name !== undefined);
+  if (sm && sm.points.length >= 2) {
+    const p0 = sm.points[0], p1 = sm.points[sm.points.length-1];
+    const dt = (p1.t - p0.t)/60;
+    if (dt > 0) {
+      const total = streamSeries.reduce((a,s)=>a + (s.points.length>=2 ? s.points[s.points.length-1].y - s.points[0].y : 0), 0);
+      document.getElementById('c-rate').textContent = '≈ ' + fmtNum(total/dt) + ' msg/min';
+    }
+  }
+}
+
+function drawTimeSeries(canvas, seriesList) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 400, h = canvas.clientHeight || 220;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const pad = {l: 52, r: 14, t: 22, b: 26};
+  const plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
+
+  let minT = Infinity, maxT = -Infinity, maxY = 0, any = false;
+  seriesList.forEach(s => s.points.forEach(p => {
+    any = true;
+    if (p.t < minT) minT = p.t;
+    if (p.t > maxT) maxT = p.t;
+    if (p.y > maxY) maxY = p.y;
+  }));
+  if (!any) {
+    ctx.fillStyle = '#90a4ae'; ctx.font = '13px sans-serif';
+    ctx.fillText('noch keine Daten – warte auf ersten Poll', pad.l, pad.t + 20);
+    return;
+  }
+  if (minT === maxT) maxT = minT + 1;
+  maxY = Math.max(maxY * 1.15, 1);
+  const X = t => pad.l + (t - minT)/(maxT - minT) * plotW;
+  const Y = y => pad.t + plotH - (y/maxY) * plotH;
+
+  ctx.strokeStyle = '#eceff1'; ctx.fillStyle = '#78909c'; ctx.font = '11px sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 4; i++) {
+    const yv = maxY * i / 4, py = Y(yv);
+    ctx.beginPath(); ctx.moveTo(pad.l, py); ctx.lineTo(w - pad.r, py); ctx.stroke();
+    ctx.fillText(fmtNum(yv), pad.l - 6, py);
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let i = 0; i <= 4; i++) {
+    const t = minT + (maxT - minT) * i / 4;
+    ctx.fillText(fmtTime(t), X(t), h - pad.b + 8);
+  }
+
+  seriesList.forEach(s => {
+    if (s.points.length < 1) return;
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath();
+    s.points.forEach((p, i) => { const x = X(p.t), y = Y(p.y); i === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y); });
+    ctx.stroke();
+    const last = s.points[s.points.length-1];
+    ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(X(last.t), Y(last.y), 3, 0, Math.PI*2); ctx.fill();
+  });
+
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '11px sans-serif';
+  let lx = pad.l;
+  seriesList.forEach(s => {
+    ctx.fillStyle = s.color; ctx.fillRect(lx, 5, 10, 10);
+    ctx.fillStyle = '#455a64'; ctx.fillText(s.name, lx + 14, 10);
+    lx += 14 + ctx.measureText(s.name).width + 18;
+  });
+}
+
+function prependEvent(ev) {
+  const feed = document.getElementById('feed');
+  const empty = feed.querySelector('.empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'ev';
+  const streamTxt = ev.stream ? `<span class="stream">${esc(ev.stream)}</span>` : '';
+  const consTxt = ev.consumer ? ` / ${esc(ev.consumer)}` : '';
+  div.innerHTML = `<span class="t">${fmtTime(toEpoch(ev.ts))}</span>
+    <span class="body"><span class="badge ${badgeFor(ev.type)}">${esc(ev.type)}</span> ${streamTxt}${consTxt}</span>`;
+  feed.prepend(div);
+  while (feed.children.length > 200) feed.removeChild(feed.lastChild);
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// SSE live feed
+const es = new EventSource('/api/events/stream');
+es.onmessage = e => { try { prependEvent(JSON.parse(e.data)); } catch (_) {} };
+es.onerror = () => { /* EventSource reconnects automatically */ };
+
+loadState();
+loadSnapshots();
+setInterval(loadState, 15000);
+setInterval(loadSnapshots, 30000);
+</script>
+</body>
+</html>
